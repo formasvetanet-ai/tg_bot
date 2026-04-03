@@ -7,6 +7,7 @@ from datetime import datetime
 from dotenv import load_dotenv
 from google.oauth2.service_account import Credentials
 from telegram import Update, ReplyKeyboardMarkup, InlineKeyboardMarkup, InlineKeyboardButton
+from telegram.error import NetworkError, TimedOut
 from telegram.ext import Application, CommandHandler, MessageHandler, CallbackQueryHandler, filters, ContextTypes
 from prompts import get_system_prompt, format_answers
 
@@ -410,6 +411,13 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
 
 
+async def handle_error(update, context: ContextTypes.DEFAULT_TYPE):
+    if isinstance(context.error, (NetworkError, TimedOut)):
+        print(f"Сетевая ошибка (временная): {context.error}")
+        return
+    print(f"Ошибка: {context.error}")
+
+
 def main():
     if not BOT_TOKEN:
         raise RuntimeError("Не найден BOT_TOKEN")
@@ -418,6 +426,7 @@ def main():
     app.add_handler(CallbackQueryHandler(handle_callback))
     app.add_handler(MessageHandler(filters.PHOTO, handle_photo))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
+    app.add_error_handler(handle_error)
     print("Бот запущен...")
     app.run_polling()
 
