@@ -1,8 +1,10 @@
 import os
+import re
 import base64
 import json
 import gspread
 import anthropic
+import urllib.request
 from datetime import datetime
 from dotenv import load_dotenv
 from google.oauth2.service_account import Credentials
@@ -151,12 +153,47 @@ async def ask_next_question(update, context, section):
         await finish_section(update, context, section)
 
 
+def get_cbr_rates():
+    """Получает актуальный курс валют с сайта ЦБ РФ."""
+    try:
+        url = "https://www.cbr.ru/scripts/XML_daily.asp"
+        req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
+        with urllib.request.urlopen(req, timeout=8) as response:
+            content = response.read().decode("windows-1251")
+        date_match = re.search(r'Date="(\d{2}\.\d{2}\.\d{4})"', content)
+        rate_date = date_match.group(1) if date_match else datetime.now().strftime("%d.%m.%Y")
+        rates = {}
+        for code in ["USD", "EUR", "CNY"]:
+            m = re.search(
+                rf"<CharCode>{code}</CharCode>\s*<Nominal>(\d+)</Nominal>\s*<Name>[^<]+</Name>\s*<Value>([\d,]+)</Value>",
+                content
+            )
+            if m:
+                nominal = int(m.group(1))
+                value = float(m.group(2).replace(",", "."))
+                rates[code] = round(value / nominal, 2)
+        if rates:
+            parts = [f"{k}: {v} руб" for k, v in rates.items()]
+            return f"Курс ЦБ РФ на {rate_date}: {', '.join(parts)}"
+        return None
+    except Exception as e:
+        print(f"Ошибка получения курса ЦБ РФ: {e}")
+        return None
+
+
 async def get_ai_response(section_key, answers):
     try:
         client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
         system_prompt = get_system_prompt(section_key)
         formatted = format_answers(section_key, answers, QUESTIONS_MAP)
         system_prompt = system_prompt.replace("{answers}", formatted)
+        if section_key == "delivery":
+            cbr = get_cbr_rates()
+            if cbr:
+                system_prompt = system_prompt.replace("{cbr_rates}", cbr)
+                print(f"DEBUG CBR: {cbr}")
+            else:
+                system_prompt = system_prompt.replace("{cbr_rates}", "курс ЦБ РФ временно недоступен")
 
         print(f"DEBUG SECTION: {section_key}")
         print(f"DEBUG ANSWERS: {formatted}")
